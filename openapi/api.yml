@@ -1,0 +1,120 @@
+openapi: 3.0.0
+info:
+  title: Sample Protected API
+  version: "1.0.0"
+  description: >
+    Minimal public API surface.
+    Includes a public health endpoint and a scoped protected endpoint.
+
+servers:
+  - url: https://your-api.example.com
+    description: Example base URL
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns basic liveness status.
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /sample/protected:
+    get:
+      summary: Protected sample endpoint
+      description: >
+        Example of a protected resource:
+        - Requires OAuth-style scope `sample.read`
+        - Enforces/echoes `x-fapi-interaction-id`
+        - Surfaces caller identity from the authorizer context
+      tags:
+        - Sample
+      parameters:
+        - in: header
+          name: x-fapi-interaction-id
+          required: false
+          description: >
+            Correlation ID for the request. Must be a valid UUIDv4 if provided.
+            If missing, the server will generate one and include it in the response.
+          schema:
+            type: string
+            format: uuid
+        - in: header
+          name: Authorization
+          required: false
+          description: >
+            Bearer token. Only required for local/dev when API Gateway authorizer
+            context is not present.
+            Example:
+            Bearer {"active":true,"scopes":["sample.read"]}
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful authorized response
+          headers:
+            x-fapi-interaction-id:
+              description: Correlation ID for this request
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleResponse'
+        '400':
+          description: Invalid x-fapi-interaction-id header
+        '401':
+          description: Missing / invalid token or no active session
+        '403':
+          description: Token valid but does not include required scope `sample.read`
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    CallerInfo:
+      type: object
+      description: Identity information derived from the API Gateway authorizer.
+      properties:
+        sub:
+          type: string
+          description: Subject / unique ID of the caller
+          example: user-12345
+        given_name:
+          type: string
+          example: Alice
+        family_name:
+          type: string
+          example: Doe
+
+    SampleResponse:
+      type: object
+      description: Response model for /sample/protected
+      properties:
+        message:
+          type: string
+          example: Access granted to protected resource
+        scopes:
+          type: array
+          items:
+            type: string
+          example: ["sample.read", "sample.write"]
+        caller:
+          $ref: '#/components/schemas/CallerInfo'
+        x_fapi_interaction_id:
+          type: string
+          format: uuid
+          description: Correlation ID associated with this request
+          example: 73cac523-d3ae-2289-b106-330a6218710d

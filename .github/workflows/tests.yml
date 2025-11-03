@@ -1,0 +1,47 @@
+name: unit-tests
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+    steps:
+      - name: Generate a token
+        id: generate_token
+        uses: raidiam/create-github-app-token@v1
+        with:
+          app_id: ${{ secrets.WORKFLOW_APP_ID }}
+          private_key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          repositories: "golambda,go-alb-proxy,go-kms-signer,go-slogctx"
+
+      - name: Checkout Source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.generate_token.outputs.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.0.0
+        with:
+          go-version-file: "go.mod"
+        id: go
+
+      - name: Docker Up
+        run: docker compose up -d
+
+      - name: Short Sleep
+        run: sleep 10
+
+      - name: Test
+        env:
+          GOPRIVATE: "github.com/raidiam/*"
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          LOCALSTACK_ENDPOINT: "http://localhost:4566"
+          AWS_ACCESS_KEY_ID: "fake"
+          AWS_SECRET_ACCESS_KEY: "fake"
+        run: |
+          git config --global url.https://x-access-token:$GITHUB_TOKEN@github.com/.insteadOf https://github.com/
+          make test
+
+      - name: Docker Down
+        run: docker compose down

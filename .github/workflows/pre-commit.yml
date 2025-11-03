@@ -1,0 +1,34 @@
+name: pre-commit
+on: [push]
+jobs:
+  pre-commit:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6.0.0
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Generate a token
+        id: generate_token
+        uses: raidiam/create-github-app-token@v1
+        with:
+          app_id: ${{ secrets.WORKFLOW_APP_ID }}
+          private_key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          repositories: "golambda,go-alb-proxy,go-kms-signer,go-slogctx"
+
+      - name: Configure golang github clone token
+        env:
+          GOPRIVATE: "github.com/raidiam/*"
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          git config --global url.https://x-access-token:$GITHUB_TOKEN@github.com/.insteadOf https://github.com/
+
+      - name: pre-commit
+        uses: pre-commit/action@v3.0.1
+        env:
+          SKIP: no-commit-to-branch

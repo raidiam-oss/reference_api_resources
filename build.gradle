@@ -1,0 +1,37 @@
+// build.gradle
+plugins {
+  id 'base'
+  id 'maven-publish'
+}
+
+def props = new Properties()
+file("version.properties").withInputStream { props.load(it) }
+
+String buildNumber = System.getenv("BUILD_NUMBER") ?: ""
+version = System.getenv("CHANGE_ID") ? "PR-${System.getenv("CHANGE_ID")}-SNAPSHOT" : "${props.VERSION}.${buildNumber}"
+group = "com.example"
+
+// NOTE:
+// We removed internal S3 publishing and AWS SDK auth dependencies.
+// Publishing now targets a local folder under build/ by default.
+// Use `./gradlew publish` to write artifacts to build/maven-repo,
+// or `./gradlew publishToMavenLocal` to publish to your ~/.m2 repository.
+
+publishing {
+  publications {
+    create('sampleApi', MavenPublication) {
+      artifactId = "sample-api"
+      artifact source: file("./cmd/mockapi/sample-api-${version}-mock-api-function.zip"), classifier: "mock-api"
+      artifact source: file("./authorizer/sample-api-${version}-authorizer-function.zip"), classifier: "authorizer"
+      artifact source: file("./openapi/api.yml"), classifier: "api-swagger", extension: "yaml"
+    }
+  }
+  repositories {
+    maven {
+      name = "localDirectory"
+      url = uri("${buildDir}/maven-repo")
+      // To publish to Maven Local instead, run:
+      //   ./gradlew publishToMavenLocal
+    }
+  }
+}

@@ -1,0 +1,11 @@
+name: Jira Ticket Validation
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+jobs:
+  jira-ticket-validation:
+    name: Jira Ticket Validation
+    uses: raidiam/terraform-workflows/.github/workflows/jira_ticket_commenter.yml@main
+    with:
+      jira-key-prefixes: "ENG,RPF,RPO,RICE"
+    secrets: inherit

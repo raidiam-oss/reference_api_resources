@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  mtls:
+    build:
+      context: .
+      dockerfile: cmd/mtls/Dockerfile
+    environment:
+      - API_URI=http://mockapi:3000
+      - SSM_TRANSPORT_CERTIFICATE_NAME=/sample-api/server-crt
+      - SSM_TRANSPORT_KEY_NAME=/sample-api/server-key
+      - SSM_CA_TRUSTED_LIST_NAME=/sample-api/ca-crt
+      - AWS_LOCAL=true
+      - REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    ports:
+      - "443:443"
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - matls-api.local
+          - matls-directory.local
+
+  localstack:
+    image: localstack/localstack
+    ports:
+      - "4566:4566"
+    environment:
+      # DynamoDB is not required anymore; keep only what we need.
+      - SERVICES=iam,ssm,lambda,kms,vpc,apigateway
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/setup-localstack.sh:/etc/localstack/init/ready.d/setup.sh:ro
+      - ./keys/:/keys:ro
+      # Mount build output directories so setup-localstack.sh can read the zips it expects:
+      #   /builds/authorizer/sample-api-<ver>-authorizer-function.zip
+      #   /builds/mock/sample-api-<ver>-mock-api-function.zip
+      - ./authorizer/:/builds/authorizer/
+      - ./cmd/mockapi/:/builds/mock/
+      - ./openapi/api.yml:/builds/openapi/api.yml
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://localhost:4566/_localstack/health || exit 1"
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+    networks:
+      default:
+        aliases:
+          - localstack.local
