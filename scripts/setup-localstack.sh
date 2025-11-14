@@ -15,21 +15,21 @@ set -e
 ########################################
 
 awslocal ssm put-parameter \
-  --name "/sample-api/ca-crt" \
-  --type "SecureString" \
-  --value "$(cat /keys/ca.crt)" \
+  --name /sample-api/server-crt \
+  --type SecureString \
+  --value "$(cat /keys/server.crt)" \
   --overwrite
 
 awslocal ssm put-parameter \
-  --name "/sample-api/server-key" \
-  --type "SecureString" \
+  --name /sample-api/server-key \
+  --type SecureString \
   --value "$(cat /keys/server.key)" \
   --overwrite
 
 awslocal ssm put-parameter \
-  --name "/sample-api/server-crt" \
-  --type "SecureString" \
-  --value "$(cat /keys/server.crt)" \
+  --name /sample-api/ca-crt \
+  --type SecureString \
+  --value "$(cat /keys/ca.crt)" \
   --overwrite
 
 ########################################

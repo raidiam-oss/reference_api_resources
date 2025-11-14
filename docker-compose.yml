@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: cmd/mtls/Dockerfile
+    volumes:
+      - ./keys:/keys:ro
     environment:
       - API_URI=http://mockapi:3000
       - SSM_TRANSPORT_CERTIFICATE_NAME=/sample-api/server-crt
@@ -19,11 +21,6 @@ services:
     depends_on:
       localstack:
         condition: service_healthy
-    networks:
-      default:
-        aliases:
-          - matls-api.local
-          - matls-directory.local
 
   localstack:
     image: localstack/localstack
