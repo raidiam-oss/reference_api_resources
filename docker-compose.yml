@@ -8,7 +8,7 @@ services:
     volumes:
       - ./keys:/keys:ro
     environment:
-      - API_URI=http://mockapi:3000
+      - API_NAME=mockapi
       - SSM_TRANSPORT_CERTIFICATE_NAME=/sample-api/server-crt
       - SSM_TRANSPORT_KEY_NAME=/sample-api/server-key
       - SSM_CA_TRUSTED_LIST_NAME=/sample-api/ca-crt
@@ -27,7 +27,6 @@ services:
     ports:
       - "4566:4566"
     environment:
-      # DynamoDB is not required anymore; keep only what we need.
       - SERVICES=iam,ssm,lambda,kms,vpc,apigateway
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test

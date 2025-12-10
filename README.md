@@ -1,155 +1,292 @@
-# Sample API
+# Sample API (reference_api_resources)
 
-A minimal HTTP API and custom authorizer designed to run as AWS Lambda functions behind API Gateway.  
-It includes a mock API with scope-based access control, a token authorizer, and an optional mTLS proxy for testing secure client authentication.
+A minimal **reference implementation** of an HTTP API, custom token authorizer, and optional mTLS proxy designed to run as AWS Lambda functions behind API Gateway.
+
+The repository is intended as a **forkable, production-inspired template** for teams experimenting with:
+
+- Secure API patterns (OAuth2 scopes, custom authorizers, mTLS, API Gateway flows)
+- Local AWS-like environments using LocalStack
+- Infrastructure validation, integration testing, and client onboarding flows
+
+This project mirrors the design standards used in the Recco repositories, but is generalized for any domain.
 
 ---
 
-## Overview
+# Table of Contents
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Folder Structure](#folder-structure)
+4. [Requirements](#requirements)
+5. [Getting Started (Local)](#getting-started-local)
+6. [Environment Variables](#environment-variables)
+7. [Running the Stack](#running-the-stack)
+8. [Testing the API](#testing-the-api)
+9. [Example Flows](#example-flows)
+10. [Deployment](#deployment)
+11. [Troubleshooting](#troubleshooting)
+
+---
+
+# Overview
+
+This repository contains:
+
+- **Mock API Lambda** – A simple, scope-protected endpoint (`/sample/protected`).
+- **Custom Authorizer Lambda** – Validates tokens and resolves scopes.
+- **mTLS Proxy** – Terminates TLS, validates client certificates, and forwards traffic to API Gateway.
+- **LocalStack automation** – Fully provisions IAM roles, Lambdas, API Gateway, and SSM.
+- **Local development CA + certificates** – Used exclusively for local testing.
+
+The goal is to be:
+
+- Simple
+- Understandable
+- Easily forkable
+- Close to real AWS behaviour
+
+---
+
+# Architecture
+
+## High-level Flow
+
+```
+Client
+  │ (HTTPS + optional mTLS)
+  ▼
+mTLS Proxy (port 443)
+  │ forwards → execute-api
+  ▼
+API Gateway (LocalStack or AWS)
+ ├── Custom Authorizer Lambda
+ └── Mock API Lambda
+```
 
 ### Components
-- **Authorizer**: validates OAuth2 tokens and supports mTLS-based client certificate checks.
-- **Mock API**: exposes simple domain endpoints (`customer`, `energy`) with scope enforcement.
-- **mTLS Proxy**: optional TLS termination layer for local or secure deployments.
-- **LocalStack setup script**: provisions IAM roles, Lambdas, and API Gateway locally for testing.
+
+| Component | Purpose |
+|----------|---------|
+| **Mock API** | Implements `/sample/protected`; enforces the `sample` scope. |
+| **Authorizer** | Reads OAuth2-style tokens, extracts scopes, returns IAM-style policy results. |
+| **mTLS proxy** | Loads certs from SSM, terminates TLS, enforces client certs, forwards to the API. |
+| **LocalStack** | Provides Lambda, SSM, IAM, and API Gateway locally. |
+| **Key materials** | Self-signed CA, server keypair, and client cert for testing. |
 
 ---
 
-## Mutual TLS (mTLS) Server
+# Folder Structure
 
-Located in `/cmd/mtls`, this service:
-- Terminates TLS and enforces client certificate authentication.
-- Validates certificates against a trusted CA bundle.
-- Uses server and client keys stored in SSM (simulated via LocalStack).
-
----
-
-## Features
-
-- AWS Lambda–compatible handlers using `aws-lambda-go-api-proxy`.
-- Example endpoints:
-    - `GET /customer/v1/customer` → requires scope: `customer`
-    - `GET /energy/v1/energy` → requires scope: `energy`
-    - `GET /health` → liveness check
-- Scope-based authorization via:
-    - Lambda authorizer context (when deployed)
-    - Bearer token fallback (for local use)
-- `x-fapi-interaction-id` header validation (must be UUIDv4).
-
----
-
-## Requirements
-
-- Go 1.24+
-- Docker
-- LocalStack (for local AWS simulation)
-- Optional AWS account for live testing
+```
+reference_api_resources/
+│
+├── cmd/
+│   └── mtls/                 # mTLS proxy (TLS termination, SSM cert loading)
+│
+├── authorizer/               # Custom authorizer Lambda
+│
+├── mockapi/                  # Sample mock API Lambda
+│
+├── infra/                    # LocalStack provisioning scripts (API Gateway, IAM, Lambdas)
+│
+├── keys/                     # Local CA, server certs, client certs
+│
+├── docker-compose.yml        # Entire local runtime stack
+└── README.md                 # This documentation
+```
 
 ---
 
-## Environment Variables
+# Requirements
+
+## Core Tools
+- Go **1.24+**
+- Docker **20+**
+- Docker Compose
+- Make (optional)
+
+## Local AWS Simulation
+- LocalStack (managed through docker-compose)
+- AWS CLI v2
+    - Credentials may be dummy (`test/test`)
+
+## TLS Tooling
+- OpenSSL (or mkcert)
+
+## Optional for AWS deployment
+- AWS Account
+- ECR, Lambda, API Gateway, SSM permissions
+
+---
+
+# Getting Started (Local)
+
+The project includes a fully automated LocalStack environment. The only required command is:
+
+```
+docker compose up --build
+```
+
+This launches:
+
+- mTLS proxy on **https://localhost**
+- Authorizer Lambda
+- Mock API Lambda
+- API Gateway REST API
+- SSM with uploaded certificates
+
+---
+
+## 1. Generate Local TLS Certificates
+
+Inside `keys/`:
+
+```
+openssl genrsa -out ca.key 4096
+openssl req -x509 -new -nodes -key ca.key -sha256 -days 365 \
+  -subj "/CN=Local CA" \
+  -out ca.crt
+
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -subj "/CN=mtls-api.local" -out server.csr
+
+openssl x509 -req -in server.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.crt -days 365 -sha256
+
+openssl genrsa -out client.key 2048
+openssl req -new -key client.key -subj "/CN=mtls-client" -out client.csr
+
+openssl x509 -req -in client.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out client.crt -days 365 -sha256
+```
+
+These are automatically uploaded to SSM by LocalStack at startup.
+
+---
+
+# Environment Variables
 
 | Variable | Description |
-|-----------|-------------|
-| `AWS_LOCAL` | Set to `true` when running under LocalStack |
-| `REGION` | AWS region (default `us-east-1`) |
-| `CLIENT_CERT_HEADER` | Header name for mTLS client cert (e.g. `TLS-Certificate`) |
-| `INTROSPECTION_ENDPOINT` | Token introspection URL *(leave blank locally)* |
-| `USER_INFO_ENDPOINT` | User info URL *(leave blank locally)* |
-| `CLIENT_ID` | OAuth2 client ID *(leave blank locally)* |
-| `SSM_TRANSPORT_CERTIFICATE_NAME` | SSM name for server certificate |
-| `SSM_TRANSPORT_KEY_NAME` | SSM name for server private key |
-| `SSM_CA_TRUSTED_LIST_NAME` | SSM name for CA certificates |
+|----------|-------------|
+| `AWS_LOCAL` | Whether to use LocalStack (`true`) |
+| `REGION` | AWS region (default: `us-east-1`) |
+| `CLIENT_CERT_HEADER` | Header containing forwarded client cert |
+| `INTROSPECTION_ENDPOINT` | Token introspection URL *(unused locally)* |
+| `USER_INFO_ENDPOINT` | User-info endpoint *(unused locally)* |
+| `CLIENT_ID` | OAuth2 client ID *(unused locally)* |
+| `SSM_TRANSPORT_CERTIFICATE_NAME` | Path to server cert in SSM |
+| `SSM_TRANSPORT_KEY_NAME` | Path to server key |
+| `SSM_CA_TRUSTED_LIST_NAME` | Path to CA bundle |
 
-When using LocalStack, TLS materials are automatically uploaded to SSM under `/sample-api/...`.
+Defaults point to:
+
+```
+/sample-api/server-crt
+/sample-api/server-key
+/sample-api/ca-crt
+```
 
 ---
 
-## Running locally
-Option A: Go build/run
-- This Lambda-oriented service is designed for API Gateway/Lambda. For local invocation you typically run with a Lambda runtime emulator (e.g., aws-lambda-rie) or SAM CLI.
+# Running the Stack
 
-Example with AWS SAM (simplified outline):
-- Create a SAM template wiring API Gateway → Lambda (runtime: provided.al2, image-based or binary handler).
-- Set env vars (AWS_LOCAL, REGION).
-- Run: sam local start-api
+```
+docker compose up --build
+```
 
-Option B: Docker container
-- The provided Dockerfile builds a minimal image suitable for local or image-based Lambda deployment.
+This will:
 
-Build:
-- docker build -t mockapi:local .
+- Deploy Lambdas
+- Deploy API Gateway
+- Load certificates to SSM
+- Start the mTLS proxy on port **443**
 
-Run against LocalStack:
-- docker network create localstack || true
-- docker run --rm -p 443:443
-  --network localstack
-  -e AWS_LOCAL=true
-  -e REGION=eu-west-1
-  --name mockapi
-  mockapi:local
+---
 
-Notes:
-- The container exposes port 443.
-- Ensure LocalStack is reachable on the same Docker network as localstack.local:4566.
+# Testing the API
 
-## Authorization and scopes
-Each protected endpoint requires specific scopes:
-- /sample/protected → sample
+## 1. Test health endpoint (HTTPS + client cert)
 
-How scopes are resolved:
-1. When behind API Gateway, the handler reads them from the custom authorizer context (scope as a space-delimited string).
-2. Otherwise, it falls back to parsing the Authorization: Bearer token.
+Using Postman:
 
-Accepted token formats for local/dev:
-- JWT with a space-delimited scope claim in payload.
-- A JSON string token that includes one of:
-    - scope: "s1 s2"
-    - scopes: ["s1","s2"]
-    - permissions: ["s1","s2"]
+- CA cert: `keys/ca.crt`
+- Client cert: `keys/client.crt`
+- Client key: `keys/client.key`
 
-Examples:
-- JWT payload idea (pseudo): { "sub":"123", "scope":"sample" }
-- JSON-string token example for sample: {"active":true,"scopes":["sample"]}
+Send:
 
-In practice, set an Authorization header like:
-- Authorization: Bearer {"active":true,"scopes":["sample"]}
+```
+GET https://localhost/health
+```
 
-Responses on failure:
-- 401 if Authorization is missing/invalid or introspection-style JSON cannot be parsed
-- 403 if token is valid but lacks required scopes
+Expected response:
 
-## x-fapi-interaction-id
-- If the client sets x-fapi-interaction-id, it must be a valid UUIDv4; otherwise the request is rejected with 400.
-- If missing, the server generates a UUIDv4 and echoes it in the response header.
+```
+{"status":"ok"}
+```
 
-## Data persistence
-- This sample is **stateless**. DynamoDB tables and seed data from the original demo were removed.
+---
 
-## Example requests (local)
-Protected endpoint (requires `sample` scope):
-- curl -i https://localhost:443/sample/protected \
-  -H 'x-fapi-interaction-id: 3fa85f64-5717-4562-b3fc-2c963f66afa6' \
-  -H 'Authorization: Bearer {"active":true,"scopes":["sample"]}'
+## 2. Test protected endpoint (scope required)
 
-Missing or invalid x-fapi-interaction-id:
-- If you pass x-fapi-interaction-id with an invalid format, you will get 400.
-- If you omit it, the response will include a generated x-fapi-interaction-id.
+```
+GET https://localhost/sample/protected
+Authorization: Bearer {"active":true,"scopes":["sample"]}
+x-fapi-interaction-id: <valid UUIDv4>
+```
 
-## Deployment
-Container image (typical for Lambda):
-- Build and push the image to ECR.
-- Create/update a Lambda function using the container image.
-- Configure an API Gateway HTTP API or REST API to route to the Lambda.
-- Configure a custom authorizer (if applicable) to provide the scope field in the authorizer context.
-- Set env vars (REGION, POPULATE_DB as needed; do not set AWS_LOCAL in production).
+Expected:
 
-IAM and permissions:
-- The Lambda role must allow access to DynamoDB (read/write as needed for your tables).
+```
+200 OK
+```
 
-## Troubleshooting
-- 401 Unauthorized: Missing Authorization header, malformed token, or token content cannot be parsed for scopes.
-- 403 Forbidden: Token valid but does not include required scope.
-- 400 Bad Request: x-fapi-interaction-id provided but not a valid UUIDv4.
-- 404 Not Found: No matching data in DynamoDB (ensure POPULATE_DB or seed data).
-- DynamoDB local connection issues: Verify Docker network and that LocalStack is reachable at [http://localstack.local:4566](http://localstack.local:4566) with AWS_LOCAL=true.
+If missing the scope `"sample"`:
+
+```
+403 Forbidden
+```
+
+If missing Authorization header:
+
+```
+401 Unauthorized
+```
+
+If invalid UUID:
+
+```
+400 Bad Request
+```
+
+---
+
+# Example Flows
+
+## Token + Authorizer flow
+1. Client sends Authorization header
+2. API Gateway invokes custom authorizer
+3. Authorizer returns IAM-style policy
+4. API Lambda executes with scope context
+
+## mTLS flow
+1. Client presents certificate
+2. Proxy validates against CA from SSM
+3. Proxy forwards request to execute-api
+4. API Gateway + Lambdas run as normal
+
+---
+
+# Troubleshooting
+
+| Problem | Likely Cause |
+|--------|--------------|
+| 308 redirect | Wrong execute-api path (double slash); check proxy logs |
+| 401 | Missing/invalid Authorization header |
+| 403 | Token valid but missing required scope |
+| 400 | Invalid UUID in `x-fapi-interaction-id` |
+| mTLS handshake failure | Wrong CA, wrong key, unsupported key format on macOS |
+| LocalStack not provisioning | Run `docker compose logs localstack` |
+
+---
